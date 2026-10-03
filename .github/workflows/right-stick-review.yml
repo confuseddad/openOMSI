@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d8a2e6e8f9f6228dacdb879f2712cde1c9bc5653
+          ref: a0a88da78367033f93662cb159e5ff9af9b565db
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -36,7 +36,7 @@ jobs:
         shell: pwsh
         run: |
           $actual = git rev-parse HEAD
-          if ($actual -ne 'd8a2e6e8f9f6228dacdb879f2712cde1c9bc5653') { throw "Unexpected checkout: $actual" }
+          if ($actual -ne 'a0a88da78367033f93662cb159e5ff9af9b565db') { throw "Unexpected checkout: $actual" }
           "Tested commit: $actual" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - name: Set custom build version
         shell: bash
@@ -71,6 +71,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist/windows | Out-Null
           Copy-Item target/release/openomsi.exe, target/release/openomsi-launcher.exe dist/windows/
+          # Required by the upstream x64 Steam integration.
+          Copy-Item assets/steam_redist/steam_api64.dll dist/windows/
       # Microsoft's shader compiler for DirectX 12 (dxcompiler.dll, dxil.dll beside the
       # program): without it wgpu falls back to the old FXC, which is slow and refuses
       # some of the game's shaders. DirectX 12 is the way round a Vulkan driver that fails.
@@ -111,6 +113,7 @@ jobs:
           # started with --server, and start.cmd
           New-Item -ItemType Directory -Force dist/server | Out-Null
           Copy-Item dist/windows/openomsi.exe, dist/windows/vcruntime140.dll, dist/windows/vcruntime140_1.dll, dist/windows/msvcp140.dll, scripts/server/start.cmd, LICENSE dist/server/
+          Copy-Item dist/windows/steam_api64.dll dist/server/
           Copy-Item docs/SERVER.md dist/server/README.md
           New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
           Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
