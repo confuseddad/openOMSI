@@ -43,7 +43,26 @@ jobs:
         run: |
           version="$(sh scripts/version.sh)-right-stick-look"
           echo "OPENOMSI_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Configure a synthetic root for launcher argument tests
+        shell: pwsh
+        run: |
+          # The launcher argument tests require root() to find the installation layout.
+          # Empty placeholders only: no original OMSI code or content is downloaded.
+          # Leave OMSI_ROOT unset so real-content integration tests retain their skip rules.
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'launcher-argument-fixture'
+          $dirs = @('maps/Grundorf', 'maps/Berlin-Spandau', 'Vehicles/MAN_SD200', 'Vehicles/MAN_SD202', 'Vehicles/MAN_NL_NG', 'Sceneryobjects', 'Splines', 'Texture', 'Fonts', 'Humans', 'Weather', 'Inputs')
+          foreach ($dir in $dirs) { New-Item -ItemType Directory -Force (Join-Path $fixtureRoot $dir) | Out-Null }
+          foreach ($file in @('Omsi.exe', 'maps/Grundorf/global.cfg', 'maps/Berlin-Spandau/global.cfg', 'envir.cfg')) {
+            New-Item -ItemType File -Force (Join-Path $fixtureRoot $file) | Out-Null
+          }
+          $testDataHome = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+          $configDir = Join-Path $testDataHome '.openomsi'
+          New-Item -ItemType Directory -Force $configDir | Out-Null
+          @{ root = $fixtureRoot; game = ''; profile = 'CI Test' } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $configDir 'launcher.json')
+          'Launcher argument tests use an empty folder fixture. Real OMSI content is not available or tested.' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - name: Full workspace tests
+        id: tests
+        continue-on-error: true
         run: cargo test --locked --workspace
       - name: Release build
         run: cargo build --locked --release
@@ -100,3 +119,10 @@ jobs:
           name: windows-${{ matrix.arch }}
           path: out/*.zip
 
+      - name: Report full test outcome
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.tests.outcome }}' -ne 'success') {
+            throw 'The full workspace test suite did not pass. See the Full workspace tests step.'
+          }
