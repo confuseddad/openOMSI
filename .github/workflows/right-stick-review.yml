@@ -1,0 +1,101 @@
+name: Right-stick look - full validation
+
+on:
+  push:
+    branches: [ci/right-stick-look-upstream]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8a84ca260537993260e4ccf486b34fe31fc6966c
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Confirm the review commit
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '8a84ca260537993260e4ccf486b34fe31fc6966c') { throw "Unexpected checkout: $actual" }
+          "Tested commit: $actual" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Set custom build version
+        shell: bash
+        run: |
+          version="$(sh scripts/version.sh)-right-stick-look"
+          echo "OPENOMSI_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Full workspace tests
+        run: cargo test --locked --workspace
+      - name: Release build
+        run: cargo build --locked --release
+      - name: Stage Windows binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows | Out-Null
+          Copy-Item target/release/openomsi.exe, target/release/openomsi-launcher.exe dist/windows/
+      # Microsoft's shader compiler for DirectX 12 (dxcompiler.dll, dxil.dll beside the
+      # program): without it wgpu falls back to the old FXC, which is slow and refuses
+      # some of the game's shaders. DirectX 12 is the way round a Vulkan driver that fails.
+      - name: DirectX shader compiler
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R microsoft/DirectXShaderCompiler --pattern "dxc_*.zip" -D dxc
+          $zip = Get-ChildItem dxc/*.zip | Where-Object { $_.Name -notmatch "linux|pdb" } | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath dxc/x
+          $arch = if ("${{ matrix.arch }}" -eq "arm64") { "arm64" } else { "x64" }
+          Copy-Item "dxc/x/bin/$arch/dxcompiler.dll", "dxc/x/bin/$arch/dxil.dll" dist/windows/
+          Get-ChildItem dist/windows
+      # The Visual C++ runtime beside the program (Microsoft allows it to be shipped
+      # app-locally): without it a PC lacking the Redistributable refused to start the game
+      # ("VCRUNTIME140_1.dll was not found"). It cannot be linked in instead - the OpenXR
+      # loader is built against the DLL runtime.
+      - name: Visual C++ runtime
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\${{ matrix.arch }}\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+          $dir = if ($crt) { $crt.FullName } elseif ("${{ matrix.arch }}" -eq "x64") { "$env:SystemRoot\System32" } else { throw "no ARM64 Visual C++ runtime in $vs" }
+          foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
+            Copy-Item (Join-Path $dir $dll) dist/windows/
+          }
+          Get-ChildItem dist/windows
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "openOMSI-$env:OPENOMSI_VERSION-windows-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item README.md, LICENSE dist/windows/
+          Compress-Archive -Path dist/windows/* -DestinationPath "out/$name.zip"
+          # the dedicated server for Windows (Server 2016 and later): the same program
+          # started with --server, and start.cmd
+          New-Item -ItemType Directory -Force dist/server | Out-Null
+          Copy-Item dist/windows/openomsi.exe, dist/windows/vcruntime140.dll, dist/windows/vcruntime140_1.dll, dist/windows/msvcp140.dll, scripts/server/start.cmd, LICENSE dist/server/
+          Copy-Item docs/SERVER.md dist/server/README.md
+          New-Item -ItemType File -Force dist/server/.openomsi-content | Out-Null
+          Compress-Archive -Path dist/server/* -DestinationPath "out/openOMSI-$env:OPENOMSI_VERSION-server-windows-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: out/*.zip
+
