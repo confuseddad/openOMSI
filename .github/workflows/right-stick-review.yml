@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 8a84ca260537993260e4ccf486b34fe31fc6966c
+          ref: d8a2e6e8f9f6228dacdb879f2712cde1c9bc5653
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -31,11 +31,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          cache-on-failure: true
       - name: Confirm the review commit
         shell: pwsh
         run: |
           $actual = git rev-parse HEAD
-          if ($actual -ne '8a84ca260537993260e4ccf486b34fe31fc6966c') { throw "Unexpected checkout: $actual" }
+          if ($actual -ne 'd8a2e6e8f9f6228dacdb879f2712cde1c9bc5653') { throw "Unexpected checkout: $actual" }
           "Tested commit: $actual" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - name: Set custom build version
         shell: bash
